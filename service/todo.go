@@ -26,7 +26,23 @@ func (s *TODOService) CreateTODO(ctx context.Context, subject, description strin
 		confirm = `SELECT subject, description, created_at, updated_at FROM todos WHERE id = ?`
 	)
 
-	return nil, nil
+	result, err := s.db.ExecContext(ctx, insert, subject, description)
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	todo := &model.TODO{ID: id}
+	if err := s.db.QueryRowContext(ctx, confirm, id).Scan(
+		&todo.Subject, &todo.Description, &todo.CreatedAt, &todo.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	return todo, nil
 }
 
 // ReadTODO reads TODOs on DB.
@@ -36,7 +52,27 @@ func (s *TODOService) ReadTODO(ctx context.Context, prevID, size int64) ([]*mode
 		readWithID = `SELECT id, subject, description, created_at, updated_at FROM todos WHERE id < ? ORDER BY id DESC LIMIT ?`
 	)
 
-	return nil, nil
+	var rows *sql.Rows
+	var err error
+	if prevID == 0 {
+		rows, err = s.db.QueryContext(ctx, read, size)
+	} else {
+		rows, err = s.db.QueryContext(ctx, readWithID, prevID, size)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	todos := make([]*model.TODO, 0, size)
+	for rows.Next() {
+		todo := &model.TODO{}
+		if err := rows.Scan(&todo.ID, &todo.Subject, &todo.Description, &todo.CreatedAt, &todo.UpdatedAt); err != nil {
+			return nil, err
+		}
+		todos = append(todos, todo)
+	}
+
+	return todos, nil
 }
 
 // UpdateTODO updates the TODO on DB.
@@ -46,7 +82,22 @@ func (s *TODOService) UpdateTODO(ctx context.Context, id int64, subject, descrip
 		confirm = `SELECT subject, description, created_at, updated_at FROM todos WHERE id = ?`
 	)
 
-	return nil, nil
+	result, err := s.db.ExecContext(ctx, update, subject, description, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if count, err := result.RowsAffected(); count == 0 || err != nil {
+		return nil, &model.ErrNotFound{}
+	}
+
+	todo := &model.TODO{ID: id}
+	if err := s.db.QueryRowContext(ctx, confirm, id).Scan(
+		&todo.Subject, &todo.Description, &todo.CreatedAt, &todo.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	return todo, nil
 }
 
 // DeleteTODO deletes TODOs on DB by ids.
